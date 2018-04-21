@@ -6,6 +6,11 @@ but trying to use cosine distance instead of incorrect Dense layer. Python3 is n
 
 DOES NOT WORK AT THE MOMENT.<br>
 
+
+![picture](pic.png?raw=true)
+
+
+
 I use SciQ dataset: http://data.allenai.org/sciq/  (already included in the data directory, ad processed data is already pickled).
 
 I use my custom word2vec embeddings with keyphrases (keyphrase segmentation code included).
