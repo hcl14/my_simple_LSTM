@@ -1,9 +1,12 @@
+
+# See https://stackoverflow.com/questions/49941903/keras-compute-cosine-distance-between-two-flattened-outputs
+
 # -*- coding: utf-8 -*-
 from __future__ import division, print_function
 #import gensim
 from keras import Model
 from keras.callbacks import ModelCheckpoint
-from keras.layers import Dense, Merge, Dropout, Reshape, Flatten, Lambda
+from keras.layers import Dense, Merge, Dropout, Reshape, Flatten, Lambda, Dot
 from keras.layers.embeddings import Embedding
 from keras.layers.recurrent import LSTM
 from keras.models import Sequential
@@ -13,6 +16,7 @@ from keras.layers.convolutional import Convolution1D, MaxPooling1D
 
 from keras import backend as K
 from keras.objectives import cosine_proximity
+from keras import optimizers
 
 import numpy as np
 import os
@@ -22,7 +26,7 @@ import kaggle
 
 import pickle
 
-# set your paths to files
+
 DATA_DIR = "data/comp_data"
 MODEL_DIR = "data/models"
 WORD2VEC_BIN = "/home/hcl/Documents/work/keyword-algorithms/process_reddit/model2/reddit_w2v_normalized.pickle"
@@ -35,14 +39,11 @@ QA_TRAIN_FILE3 = "valid.json"
 
 QA_EMBED_SIZE = 64
 BATCH_SIZE = 32
-NBR_EPOCHS = 2
+NBR_EPOCHS = 50
 
 ## extract data
 
 print("Loading and formatting data...")
-
-
-# uncomment to prosess data
 '''
 qapairs1 = kaggle.get_question_answer_pairs(
     os.path.join(DATA_DIR, QA_TRAIN_FILE))
@@ -58,7 +59,7 @@ with open("processed_input.pickle", "wb") as outfile:
     pickle.dump(qapairs, outfile,protocol=pickle.HIGHEST_PROTOCOL) 
 '''
 
-# loading preprocessed (tokenized) dataset
+
 with open("processed_input.pickle", 'rb') as f:
     qapairs = pickle.load(f)
 
@@ -96,97 +97,71 @@ for word, index in word2idx.items():
 
 
 
-
-def cosine_distance(vests):
-    x, y = vests
-    x = K.batch_flatten(x)
-    y = K.batch_flatten(y)
-    x = K.l2_normalize(x, axis=-1)
-    y = K.l2_normalize(y, axis=-1)
-    return -K.mean(x * y, axis=-1)
-
-
-
 print("Building model...")
-'''
+
+#question
 qenc = Sequential()
 qenc.add(Embedding(output_dim=WORD2VEC_EMBED_SIZE, input_dim=vocab_size,
-                   input_length=seq_maxlen,
-                   weights=[embedding_weights]))
-qenc.add(LSTM(QA_EMBED_SIZE, return_sequences=True))
-qenc.add(Dropout(0.3))
-
-aenc = Sequential()
-aenc.add(Embedding(output_dim=WORD2VEC_EMBED_SIZE, input_dim=vocab_size,
-                   input_length=seq_maxlen,
-                   weights=[embedding_weights]))
-aenc.add(LSTM(QA_EMBED_SIZE, return_sequences=True))
-aenc.add(Dropout(0.3))
-
-# attention model
-attn = Sequential()
-attn.add(Merge([qenc, aenc], mode="dot", dot_axes=[1, 1]))
-attn.add(Flatten())
-attn.add(Dense((seq_maxlen * QA_EMBED_SIZE)))
-attn.add(Reshape((seq_maxlen, QA_EMBED_SIZE)))
-
-model = Sequential()
-model.add(Merge([qenc, attn], mode="sum"))
-model.add(Flatten())
-model.add(Dense(2, activation="softmax"))
-'''
-qenc = Sequential()
-qenc.add(Embedding(output_dim=WORD2VEC_EMBED_SIZE, input_dim=vocab_size,
-                   input_length=seq_maxlen,
-                   weights=[embedding_weights]))
+                   input_length=seq_maxlen))
 qenc.add(Bidirectional(LSTM(QA_EMBED_SIZE, return_sequences=True), 
                        merge_mode="sum"))
-qenc.add(Dropout(0.3))
-qenc.add(Convolution1D(QA_EMBED_SIZE // 2, 5, border_mode="valid"))
-qenc.add(MaxPooling1D(pool_length=2, border_mode="valid"))
-qenc.add(Dropout(0.3))
-qenc.add(Flatten())
+#qenc.add(Dropout(0.15))
+qenc.add(Convolution1D(QA_EMBED_SIZE // 2, 5, padding="valid",activation='relu'))
+qenc.add(MaxPooling1D(pool_size=2, padding="valid"))
+#qenc.add(Dropout(0.15))
 
+# answer
 aenc = Sequential()
 aenc.add(Embedding(output_dim=WORD2VEC_EMBED_SIZE, input_dim=vocab_size,
-                   input_length=seq_maxlen,
-                   weights=[embedding_weights]))
+                   input_length=seq_maxlen))
 aenc.add(Bidirectional(LSTM(QA_EMBED_SIZE, return_sequences=True),
                        merge_mode="sum"))
-aenc.add(Dropout(0.3))
-aenc.add(Convolution1D(QA_EMBED_SIZE // 2, 5, border_mode="valid"))
-aenc.add(MaxPooling1D(pool_length=2, border_mode="valid"))
-aenc.add(Dropout(0.3))
+#aenc.add(Dropout(0.15))
+aenc.add(Convolution1D(QA_EMBED_SIZE // 2, 5, padding="valid",activation='relu'))
+aenc.add(MaxPooling1D(pool_size=2, padding="valid"))
+#aenc.add(Dropout(0.15))
 
-
-unflattened_qenc = Sequential()
-unflattened_qenc.add(qenc)
-unflattened_qenc.add(Reshape((aenc.output_shape[1],aenc.output_shape[2])))
 
 # attention model
-attn = Sequential()
-attn.add(Merge([unflattened_qenc, aenc], mode="dot", dot_axes=[1, 1]))
-attn.add(Flatten())
-#attn.add(Dense((seq_maxlen * QA_EMBED_SIZE)))
-#attn.add(Reshape((seq_maxlen, QA_EMBED_SIZE)))
-attn.add(Dense((aenc.output_shape[1]*(QA_EMBED_SIZE // 2))))
-attn.add(Reshape((aenc.output_shape[1], QA_EMBED_SIZE // 2)))
-attn.add(Flatten())
+
+#notice that I'm taking "tensors" qenc.output and aenc.output
+#I'm not passing "models" to a layer, I'm passing tensors 
+
+attOut = Dot(axes=1)([qenc.output, aenc.output]) 
+    #shape = (samples,QA_EMBED_SIZE//2, QA_EMBED_SIZE//2)
+    #I really don't understand this output shape.... 
+    #I'd swear it should be (samples, 1, QA_EMBED_SIZE//2)
+attOut = Flatten()(attOut) #shape is now only (samples,)
+attOut = Dense((qenc.output_shape[1]*(QA_EMBED_SIZE // 2)),activation='tanh')(attOut)
+attOut = Reshape((qenc.output_shape[1], QA_EMBED_SIZE // 2))(attOut) 
 
 
-model = Sequential()
-model.add(Merge([qenc, attn], mode="cos", dot_axes=1))
+#    Notice the output shape: (samples, (seq_maxlen-4)/2, QA_EMBED_SIZE // 2).
+#    Notice also that this attention part requires two inputs
+
+#Now, you can flatten the outputs of qenc and attn, no problem, you just can't do it "inside" the qenc model.
+
+flatAttOut = Flatten()(attOut)
+flatQencOut = Flatten()(qenc.output)
+similarity = Dot(axes=1,normalize=True)([flatQencOut,flatAttOut])
+
+model = Model([qenc.input,aenc.input],similarity)
 
 
-'''
-model = Sequential()
-model.add(Merge([qenc, attn], mode="sum"))
-model.add(Flatten())
-model.add(Dense(1, activation="softmax"))
-'''
+def mean_squared_error(y_true, y_pred):
+    return K.mean(K.square(y_pred - y_true), axis=-1)
+
+def balanceLoss(yTrue,yPred):
+
+    loss = mean_squared_error(yTrue,yPred)
+    scaledTrue = (3*yTrue) + 1 
+        #true values are 4 times worth the false values
+        #contains 4 for true and 1 for false
+
+    return scaledTrue * loss
 
 
-model.compile(optimizer="adam", loss="mean_squared_error",
+model.compile(optimizer="adam", loss=balanceLoss,
               metrics=["accuracy"])
 
 print("Training...")

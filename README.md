@@ -4,7 +4,7 @@
 My attempt of realization of a simple QA LSTM with attention and cosine measure between question and answer, following the project https://github.com/sujitpal/dl-models-for-qa <br>
 but trying to use cosine distance instead of incorrect Dense layer. Python3 is needed because of pickle highest protocol. Memory requirements are >6 GB RAM.<br>
 
-DOES NOT WORK AT THE MOMENT.<br>
+DOES NOT WORK PROPERLY AT THE MOMENT - trains only to 75%(i.e. outputs all false. The same problem as in https://github.com/sujitpal/dl-models-for-qa). I keep working to make it train properly.<br>
 
 
 ![picture](pic.png?raw=true)
